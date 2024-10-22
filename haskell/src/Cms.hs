@@ -6,9 +6,9 @@ module Cms
 
 import Control.Applicative (empty)
 import Control.Monad.Except
-import Data.Aeson ((.:), (.=))
+import Data.Aeson (parseJSON, (.:), (.=))
 import Data.Aeson qualified as Aeson
-import Data.Aeson.Types qualified as Aeson
+import Data.Aeson.Types (parseMaybe)
 import Data.Set qualified as Set
 import Data.Time.Calendar
 import Data.Time.Clock
@@ -71,8 +71,8 @@ createCmsReport = do
   now <- today
   let reportFilename = "cms-" <> show now <> ".json"
 
-  -- Functional core.
-  let result = cmsReport response
+  -- Functional core, with error handling.
+  let result = responseBody response >>= parseCmsReport
 
   -- Handle result, and write CMS report to file.
   handleResult reportFilename result
@@ -80,25 +80,30 @@ createCmsReport = do
 today :: IO Day
 today = getCurrentTime >>= pure . utctDay
 
-cmsReport :: Response (Either JSONException Aeson.Value) -> CmsMonad CmsReport
-cmsReport response
+responseBody
+  :: Response (Either JSONException Aeson.Value)
+  -> CmsMonad Aeson.Value
+responseBody response
   | httpStatus == 200 =
       case (getResponseBody response :: Either JSONException Aeson.Value) of
         Left err -> throwError $ JsonError err
-        Right records ->
-          case Aeson.parseMaybe Aeson.parseJSON records of
-            Nothing -> throwError NoRecords
-            Just (posts :: [Post]) ->
-              let users = countUsers posts
-              in  pure
-                    CmsReport
-                      { posts = length posts
-                      , users
-                      , meanPostsPerUser = length posts `div` users
-                      }
+        Right body -> pure body
   | otherwise = throwError $ HttpError httpStatus
   where
     httpStatus = getResponseStatusCode response
+
+parseCmsReport :: Aeson.Value -> CmsMonad CmsReport
+parseCmsReport records =
+  maybe (throwError NoRecords) (pure . toReport) $ parseMaybe parseJSON records
+  where
+    toReport :: [Post] -> CmsReport
+    toReport posts =
+      let users = countUsers posts
+      in  CmsReport
+            { posts = length posts
+            , users
+            , meanPostsPerUser = length posts `div` users
+            }
     countUsers =
       length . foldl (\acc post -> Set.insert (post.userId) acc) Set.empty
 
