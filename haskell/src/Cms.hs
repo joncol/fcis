@@ -5,6 +5,7 @@ module Cms
   ) where
 
 import Control.Applicative (empty)
+import Control.Monad.Except
 import Data.Aeson ((.:), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Types qualified as Aeson
@@ -53,38 +54,59 @@ instance Aeson.ToJSON CmsReport where
           <> "mean_posts_per_user" .= meanPostsPerUser
       )
 
+data CmsError = HttpError Int | JsonError JSONException | NoRecords
+
+instance Show CmsError where
+  show (HttpError status) = "Error occurred, status = " <> show status
+  show (JsonError err) = "Error occurred: " <> show err
+  show NoRecords = "Error occurred: no records"
+
+type CmsMonad = Either CmsError
+
 createCmsReport :: IO ()
 createCmsReport = do
+  -- Prepare inputs, and fetch data from external source.
   putStrLn "Getting CMS data"
   response <- httpJSONEither cmsUrl
-  let httpStatus = getResponseStatusCode response
-  if httpStatus == 200
-    then do
-      case (getResponseBody response :: Either JSONException Aeson.Value) of
-        Left err -> putStrLn $ "Error occurred: " <> show err
-        Right records -> do
-          case Aeson.parseMaybe Aeson.parseJSON records of
-            Nothing -> putStrLn $ "Error occurred: no records"
-            Just (posts :: [Post]) -> do
-              putStrLn $ "CMS data has: " <> show (length posts) <> " records"
-              now <- today
-              let reportFilename = "cms-" <> show now <> ".json"
-                  users =
-                    foldl
-                      (\acc post -> Set.insert (post.userId) acc)
-                      Set.empty
-                      posts
-                  meanPostsPerUser = length posts `div` length users
-              Aeson.encodeFile reportFilename $
-                CmsReport
-                  { posts = length posts
-                  , users = length users
-                  , meanPostsPerUser
-                  }
-              putStrLn "Wrote CMS report"
-    else do
-      putStrLn $ "Error occurred, status = " <> show httpStatus
-      exitFailure
+  now <- today
+  let reportFilename = "cms-" <> show now <> ".json"
+
+  -- Functional core.
+  let result = cmsReport response
+
+  -- Handle result, and write CMS report to file.
+  handleResult reportFilename result
 
 today :: IO Day
 today = getCurrentTime >>= pure . utctDay
+
+cmsReport :: Response (Either JSONException Aeson.Value) -> CmsMonad CmsReport
+cmsReport response
+  | httpStatus == 200 =
+      case (getResponseBody response :: Either JSONException Aeson.Value) of
+        Left err -> throwError $ JsonError err
+        Right records ->
+          case Aeson.parseMaybe Aeson.parseJSON records of
+            Nothing -> throwError NoRecords
+            Just (posts :: [Post]) ->
+              let users = countUsers posts
+              in  pure
+                    CmsReport
+                      { posts = length posts
+                      , users
+                      , meanPostsPerUser = length posts `div` users
+                      }
+  | otherwise = throwError $ HttpError httpStatus
+  where
+    httpStatus = getResponseStatusCode response
+    countUsers =
+      length . foldl (\acc post -> Set.insert (post.userId) acc) Set.empty
+
+handleResult :: FilePath -> CmsMonad CmsReport -> IO ()
+handleResult reportFilename (Right report) = do
+  putStrLn $ "CMS data has: " <> show report.posts <> " records"
+  Aeson.encodeFile reportFilename report
+  putStrLn "Wrote CMS report"
+handleResult _ (Left err) = do
+  putStrLn $ show err
+  exitFailure
