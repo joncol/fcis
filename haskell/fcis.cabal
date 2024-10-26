@@ -11,24 +11,20 @@ extra-doc-files: README.md
 
 common common-options
   build-depends:      base >=4.9 && <5
-  default-language:   Haskell2010
+  default-language:   GHC2021
   default-extensions:
     DeriveAnyClass
-    DeriveGeneric
     DerivingStrategies
     DuplicateRecordFields
-    ImportQualifiedPost
     LambdaCase
-    NamedFieldPuns
     NoFieldSelectors
     OverloadedLabels
     OverloadedRecordDot
     OverloadedStrings
     RecordWildCards
-    ScopedTypeVariables
 
   ghc-options:
-    -Wall -Wcompat -Widentities -Wincomplete-record-updates
+    -Wall -Werror -Wcompat -Widentities -Wincomplete-record-updates
     -Wincomplete-uni-patterns -Wpartial-fields
     -Wprepositive-qualified-module -Wredundant-constraints
     -fdefer-typed-holes -fhide-source-paths
