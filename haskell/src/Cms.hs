@@ -94,16 +94,20 @@ responseBody response
 
 parseCmsReport :: Aeson.Value -> CmsMonad CmsReport
 parseCmsReport records =
-  maybe (throwError NoRecords) (pure . toReport) $ parseMaybe parseJSON records
+  maybe
+    (throwError NoRecords)
+    (pure . toReport)
+    $ parseMaybe parseJSON records
+
+toReport :: [Post] -> CmsReport
+toReport posts =
+  let users = countUsers posts
+  in  CmsReport
+        { posts = length posts
+        , users
+        , meanPostsPerUser = length posts `div` users
+        }
   where
-    toReport :: [Post] -> CmsReport
-    toReport posts =
-      let users = countUsers posts
-      in  CmsReport
-            { posts = length posts
-            , users
-            , meanPostsPerUser = length posts `div` users
-            }
     countUsers =
       length . foldl (\acc post -> Set.insert (post.userId) acc) Set.empty
 
